@@ -9,6 +9,10 @@ async function startServer() {
     throw new Error('PORT mora biti ceo broj između 1 i 65535.')
   }
 
+  if (!process.env.JWT_SECRET) {
+    throw new Error('Nedostaje JWT_SECRET u konfiguraciji okruženja.')
+  }
+
   await connectDB()
 
   const server = app.listen(port, '127.0.0.1')

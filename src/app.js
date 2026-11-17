@@ -1,10 +1,14 @@
+import cookieParser from 'cookie-parser'
 import express from 'express'
+import authRoutes from './routes/auth.routes.js'
 import wordGameRoutes from './routes/wordGame.routes.js'
 
 const app = express()
 
 // Middleware: pretvara JSON iz tela zahteva u objekat req.body
 app.use(express.json())
+// Middleware: čita kolačiće iz zahteva u objekat req.cookies
+app.use(cookieParser())
 
 app.get('/api/health', (_req, res) => {
   res.status(200).json({
@@ -13,6 +17,7 @@ app.get('/api/health', (_req, res) => {
   })
 })
 
+app.use('/api/auth', authRoutes)
 app.use('/api/games/word', wordGameRoutes)
 
 // Nijedna ruta se nije poklopila
