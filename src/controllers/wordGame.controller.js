@@ -1,4 +1,6 @@
+import mongoose from 'mongoose'
 import Word from '../models/Word.js'
+import WordGame from '../models/WordGame.js'
 import { getDailyWord, getTodayKey } from '../utils/dailyWord.js'
 import { evaluateGuess } from '../utils/evaluateGuess.js'
 
@@ -6,47 +8,93 @@ const WORD_LENGTH = 5
 const MAX_ATTEMPTS = 6
 const SERBIAN_WORD = /^[ABCČĆDĐEFGHIJKLMNOPRSŠTUVZŽ]{5}$/
 
-// GET /api/games/word/today
-// Osnovni podaci o današnjoj igri. Tajna reč se NE šalje!
-export function getToday(_req, res) {
+// Poeni za pobedu, po broju pokušaja: iz 1. pokušaja 100, ..., iz 6. pokušaja 20
+const SCORES = [100, 80, 60, 40, 30, 20]
+
+// Ono što frontend sme da vidi. Rešenje samo kad je igra gotova.
+function toPublicGame(game) {
+  const isFinished = game.status !== 'playing'
+  return {
+    guesses: game.guesses,
+    status: game.status,
+    score: game.score,
+    answer: isFinished ? game.answer : undefined,
+  }
+}
+
+// Nađi današnju partiju korisnika, ili je napravi ako još ne postoji
+async function findOrCreateGame(userId, date) {
+  const existing = await WordGame.findOne({ user: userId, date }).select('+answer')
+  if (existing) return existing
+
+  try {
+    const answer = await getDailyWord(date)
+    return await WordGame.create({ user: userId, date, answer })
+  } catch (error) {
+    // Dva zahteva su istovremeno pokušala da naprave partiju: uzmi onu koja je napravljena
+    if (error.code === 11000) {
+      return WordGame.findOne({ user: userId, date }).select('+answer')
+    }
+    throw error
+  }
+}
+
+// GET /api/games/word/today   (zaštićena ruta)
+// Podaci o današnjoj igri i dosadašnji pokušaji prijavljenog korisnika
+export async function getToday(req, res) {
+  const date = getTodayKey()
+  const game = await WordGame.findOne({ user: req.user.id, date }).select('+answer')
+
   res.json({
-    date: getTodayKey(),
+    date,
     wordLength: WORD_LENGTH,
     maxAttempts: MAX_ATTEMPTS,
+    game: game ? toPublicGame(game) : { guesses: [], status: 'playing', score: 0 },
   })
 }
 
-// POST /api/games/word/guess   telo: { "guess": "MAJKA", "attempt": 1 }
-// Proveri pokušaj i vrati boje za svako slovo.
+// POST /api/games/word/guess   (zaštićena ruta)   telo: { "guess": "MAJKA" }
 export async function checkGuess(req, res) {
   const guess = String(req.body?.guess ?? '').trim().toUpperCase()
-  const attempt = Number(req.body?.attempt)
 
-  // 1. Validacija: da li je klijent poslao ispravne podatke?
+  // 1. Validacija
   if (!SERBIAN_WORD.test(guess)) {
     return res.status(400).json({ message: `Reč mora imati ${WORD_LENGTH} slova srpske latinice.` })
   }
 
-  if (!Number.isInteger(attempt) || attempt < 1 || attempt > MAX_ATTEMPTS) {
-    return res.status(400).json({ message: `Broj pokušaja mora biti od 1 do ${MAX_ATTEMPTS}.` })
-  }
-
-  // 2. Da li reč postoji u rečniku?
   const exists = await Word.exists({ text: guess })
   if (!exists) {
     return res.status(400).json({ message: 'Ova reč nije u rečniku.' })
   }
 
-  // 3. Uporedi sa današnjom reči
-  const answer = await getDailyWord(getTodayKey())
-  const statuses = evaluateGuess(guess, answer)
-  const isCorrect = guess === answer
-  const isLastAttempt = attempt === MAX_ATTEMPTS
+  // 2. Nađi partiju i proveri da li još traje
+  const game = await findOrCreateGame(req.user.id, getTodayKey())
 
-  res.json({
-    statuses,
-    isCorrect,
-    // Rešenje otkrivamo tek kad je igra gotova
-    answer: isCorrect || isLastAttempt ? answer : undefined,
-  })
+  if (game.status !== 'playing') {
+    return res.status(409).json({ message: 'Današnja igra je završena. Nova reč stiže sutra.' })
+  }
+
+  // 3. Oboji pokušaj i ažuriraj partiju. Server sam broji pokušaje.
+  game.guesses.push({ word: guess, statuses: evaluateGuess(guess, game.answer) })
+
+  if (guess === game.answer) {
+    game.status = 'won'
+    game.score = SCORES[game.guesses.length - 1]
+    game.finishedAt = new Date()
+  } else if (game.guesses.length >= MAX_ATTEMPTS) {
+    game.status = 'lost'
+    game.finishedAt = new Date()
+  }
+
+  try {
+    await game.save()
+  } catch (error) {
+    // Isti pokušaj je poslat dva puta istovremeno (npr. dupli klik)
+    if (error instanceof mongoose.Error.VersionError) {
+      return res.status(409).json({ message: 'Pokušaj je već poslat. Osveži stranicu.' })
+    }
+    throw error
+  }
+
+  res.json({ game: toPublicGame(game) })
 }
