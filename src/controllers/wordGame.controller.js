@@ -1,7 +1,9 @@
 import mongoose from 'mongoose'
+import { recordScore } from '../models/Score.js'
 import Word from '../models/Word.js'
 import WordGame from '../models/WordGame.js'
-import { getDailyWord, getTodayKey } from '../utils/dailyWord.js'
+import { getDailyWord } from '../utils/dailyWord.js'
+import { getTodayKey } from '../utils/dates.js'
 import { evaluateGuess } from '../utils/evaluateGuess.js'
 
 const WORD_LENGTH = 5
@@ -94,6 +96,11 @@ export async function checkGuess(req, res) {
       return res.status(409).json({ message: 'Pokušaj je već poslat. Osveži stranicu.' })
     }
     throw error
+  }
+
+  // 4. Partija je gotova: predaj rezultat rang listi
+  if (game.status !== 'playing') {
+    await recordScore({ userId: req.user.id, game: 'pogodi-rec', date: game.date, score: game.score })
   }
 
   res.json({ game: toPublicGame(game) })

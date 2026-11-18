@@ -18,6 +18,23 @@ export function requireAuth(req, res, next) {
   }
 }
 
+// Za javne rute koje prijavljenom korisniku prikazuju nešto više (npr. "tvoje mesto"):
+// nikad ne odbija zahtev, samo postavi req.user ako je token ispravan
+export function optionalAuth(req, _res, next) {
+  const token = req.cookies?.[AUTH_COOKIE]
+
+  if (token) {
+    try {
+      const payload = verifyToken(token)
+      req.user = { id: payload.id, role: payload.role }
+    } catch {
+      // neispravan ili istekao token: ponašaj se kao da niko nije prijavljen
+    }
+  }
+
+  next()
+}
+
 // Za rute koje sme da koristi samo admin (koristi se POSLE requireAuth)
 export function requireAdmin(req, res, next) {
   if (req.user?.role !== 'admin') {

@@ -1,6 +1,7 @@
 import cookieParser from 'cookie-parser'
 import express from 'express'
 import authRoutes from './routes/auth.routes.js'
+import leaderboardRoutes from './routes/leaderboard.routes.js'
 import wordGameRoutes from './routes/wordGame.routes.js'
 
 const app = express()
@@ -19,6 +20,7 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/auth', authRoutes)
 app.use('/api/games/word', wordGameRoutes)
+app.use('/api/leaderboard', leaderboardRoutes)
 
 // Nijedna ruta se nije poklopila
 app.use((_req, res) => {
